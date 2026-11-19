@@ -1,0 +1,6 @@
+{
+  "name": "ZONE — متجر شحن الألعاب والبطاقات الرقمية",
+  "description": "منصة ZONE المتطورة للشحن المباشر للألعاب، بطاقات الهدايا الرقمية، واشتراكات الترفيه ونمط الحياة مع الدفع عبر المحافظ الإلكترونية وتتبع الطلبات التلقائي.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
