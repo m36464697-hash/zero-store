@@ -23,13 +23,23 @@ interface CheckoutTarget {
 }
 
 function ZoneAppContent() {
-  const { products, categories, addToCart, setCartOpen } = useStore();
+  const { storeReady, products, categories, addToCart, setCartOpen } = useStore();
   const [activePage, setActivePage] = useState<ActivePage>('home');
   const [profileInitialTab, setProfileInitialTab] = useState<ProfileTab>('info');
   const [prefilledVoucherCode, setPrefilledVoucherCode] = useState('');
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
   const [invoiceOrder, setInvoiceOrder] = useState<OrderRecord | null>(null);
+
+  if (!storeReady) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-[#090B0E] flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-full border-2 border-zinc-300 dark:border-zinc-800 border-t-emerald-500 animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   const handleNavigate = (page: ActivePage) => {
     setActivePage(page);

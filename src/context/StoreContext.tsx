@@ -125,6 +125,7 @@ interface SendNotificationPayload {
 }
 
 interface StoreContextValue {
+  storeReady: boolean;
   theme: ThemeMode;
   toggleTheme: () => void;
   nowMs: number;
@@ -211,6 +212,60 @@ function maskBuyerName(name: string): string {
   return `${parts[0]} ${parts[1].charAt(0)}.`;
 }
 
+const LIVE_STORE_CACHE_KEY = 'zero_store_live_cache_v1';
+
+const EMPTY_SITE_CONFIG: SiteConfig = {
+  brandName: 'Zero Store',
+  logoUrl: '/assets/aistudio/__________ZCIO________2f74a1f6.png',
+  heroTitle: '',
+  heroSubtitle: '',
+  heroCtaText: 'تصفح العروض',
+  heroImageUrl: '',
+  promoBannerText: '',
+  promoBannerActive: false,
+  marqueeFeatures: [],
+  primaryAccentColor: '#10B981',
+  supportEmail: '',
+  supportWhatsapp: '',
+  currencyCode: 'EGP',
+  currencySymbol: 'ج.م',
+  livePopupEnabled: true,
+  autoFulfillmentEnabled: false,
+  footerAboutText: '',
+};
+
+interface LiveStoreCache {
+  siteConfig?: SiteConfig;
+  categories?: StoreCategory[];
+  products?: Product[];
+  coupons?: Coupon[];
+  paymentMethods?: PaymentMethod[];
+  flashDeals?: FlashDeal[];
+  bundles?: ValueBundle[];
+}
+
+function readLiveStoreCache(): LiveStoreCache | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(LIVE_STORE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LiveStoreCache;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function patchLiveStoreCache(patch: Partial<LiveStoreCache>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const existing = readLiveStoreCache() ?? {};
+    localStorage.setItem(LIVE_STORE_CACHE_KEY, JSON.stringify({ ...existing, ...patch }));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
@@ -264,21 +319,47 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const defaultFlashDeals = useMemo(() => createDefaultFlashDeals(), []);
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
-  const [categories, setCategories] = useState<StoreCategory[]>(DEFAULT_CATEGORIES);
-  const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
-  const [coupons, setCoupons] = useState<Coupon[]>(DEFAULT_COUPONS);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
-  const [flashDeals, setFlashDeals] = useState<FlashDeal[]>(defaultFlashDeals);
-  const [bundles, setBundles] = useState<ValueBundle[]>(DEFAULT_BUNDLES);
+  const initialCache = useMemo(() => readLiveStoreCache(), []);
+  const [storeReady, setStoreReady] = useState<boolean>(() => Boolean(initialCache?.siteConfig));
+
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(
+    () => initialCache?.siteConfig ?? EMPTY_SITE_CONFIG
+  );
+  const [categories, setCategories] = useState<StoreCategory[]>(
+    () => initialCache?.categories ?? []
+  );
+  const [products, setProducts] = useState<Product[]>(
+    () => initialCache?.products ?? []
+  );
+  const [coupons, setCoupons] = useState<Coupon[]>(
+    () => initialCache?.coupons ?? []
+  );
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(
+    () => initialCache?.paymentMethods ?? []
+  );
+  const [flashDeals, setFlashDeals] = useState<FlashDeal[]>(
+    () => initialCache?.flashDeals ?? []
+  );
+  const [bundles, setBundles] = useState<ValueBundle[]>(
+    () => initialCache?.bundles ?? []
+  );
   const [reviews, setReviews] = useState<ProductReview[]>([]);
 
-  const [catalogSeeded, setCatalogSeeded] = useState(false);
-  const [walletsSeeded, setWalletsSeeded] = useState(false);
-  const [categoriesSeeded, setCategoriesSeeded] = useState(false);
-  const [flashDealsSeeded, setFlashDealsSeeded] = useState(false);
-  const [bundlesSeeded, setBundlesSeeded] = useState(false);
+  const [catalogSeeded, setCatalogSeeded] = useState(
+    () => Boolean(initialCache?.products && initialCache.products.length > 0)
+  );
+  const [walletsSeeded, setWalletsSeeded] = useState(
+    () => Boolean(initialCache?.paymentMethods && initialCache.paymentMethods.length > 0)
+  );
+  const [categoriesSeeded, setCategoriesSeeded] = useState(
+    () => Boolean(initialCache?.categories && initialCache.categories.length > 0)
+  );
+  const [flashDealsSeeded, setFlashDealsSeeded] = useState(
+    () => Boolean(initialCache?.flashDeals && initialCache.flashDeals.length > 0)
+  );
+  const [bundlesSeeded, setBundlesSeeded] = useState(
+    () => Boolean(initialCache?.bundles && initialCache.bundles.length > 0)
+  );
 
   const [userOrders, setUserOrders] = useState<OrderRecord[]>([]);
   const [allOrders, setAllOrders] = useState<OrderRecord[]>([]);
@@ -473,6 +554,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Public Catalog & Global Broadcast Notifications
   useEffect(() => {
+    let configDone = false;
+    let catsDone = false;
+    let prodsDone = false;
+    let couponsDone = false;
+    let walletsDone = false;
+    let dealsDone = false;
+    let bundlesDone = false;
+
+    const markReadyIfAllLoaded = () => {
+      if (
+        configDone &&
+        catsDone &&
+        prodsDone &&
+        couponsDone &&
+        walletsDone &&
+        dealsDone &&
+        bundlesDone
+      ) {
+        setStoreReady(true);
+      }
+    };
+
     const unsubConfig = onSnapshot(
       doc(db, 'siteConfig', 'main'),
       (snap) => {
@@ -481,14 +584,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const rawLogo = data.logoUrl?.trim() || '';
           const shouldUseNewDefault =
             !rawLogo || rawLogo.includes('__________zero_store________068f7bda.png');
-          setSiteConfig({
-            ...DEFAULT_SITE_CONFIG,
+          const nextConfig: SiteConfig = {
+            ...EMPTY_SITE_CONFIG,
             ...data,
-            logoUrl: shouldUseNewDefault ? DEFAULT_SITE_CONFIG.logoUrl : rawLogo,
-          });
+            logoUrl: shouldUseNewDefault ? EMPTY_SITE_CONFIG.logoUrl : rawLogo,
+          };
+          setSiteConfig(nextConfig);
+          patchLiveStoreCache({ siteConfig: nextConfig });
+        } else {
+          setSiteConfig(EMPTY_SITE_CONFIG);
         }
+        configDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        configDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.GET, 'siteConfig/main');
       }
     );
@@ -496,20 +607,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubCategories = onSnapshot(
       collection(db, 'categories'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<StoreCategory, 'id'>),
-          }));
-          list.sort((a, b) => a.sortOrder - b.sortOrder);
-          setCategories(list);
-          setCategoriesSeeded(true);
-        } else {
-          setCategories(DEFAULT_CATEGORIES);
-          setCategoriesSeeded(false);
-        }
+        const list = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<StoreCategory, 'id'>),
+        }));
+        list.sort((a, b) => a.sortOrder - b.sortOrder);
+        setCategories(list);
+        setCategoriesSeeded(list.length > 0);
+        patchLiveStoreCache({ categories: list });
+        catsDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        catsDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.LIST, 'categories');
       }
     );
@@ -517,17 +628,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubProducts = onSnapshot(
       collection(db, 'products'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Product, 'id'>) }));
-          list.sort((a, b) => a.sortOrder - b.sortOrder);
-          setProducts(list);
-          setCatalogSeeded(true);
-        } else {
-          setProducts(DEFAULT_PRODUCTS);
-          setCatalogSeeded(false);
-        }
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Product, 'id'>) }));
+        list.sort((a, b) => a.sortOrder - b.sortOrder);
+        setProducts(list);
+        setCatalogSeeded(list.length > 0);
+        patchLiveStoreCache({ products: list });
+        prodsDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        prodsDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.LIST, 'products');
       }
     );
@@ -535,15 +646,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubCoupons = onSnapshot(
       collection(db, 'coupons'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          setCoupons(
-            snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Coupon, 'id'>) }))
-          );
-        } else {
-          setCoupons(DEFAULT_COUPONS);
-        }
+        const list = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Coupon, 'id'>),
+        }));
+        setCoupons(list);
+        patchLiveStoreCache({ coupons: list });
+        couponsDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        couponsDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.LIST, 'coupons');
       }
     );
@@ -551,20 +665,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubWallets = onSnapshot(
       collection(db, 'paymentMethods'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<PaymentMethod, 'id'>),
-          }));
-          list.sort((a, b) => a.sortOrder - b.sortOrder);
-          setPaymentMethods(list);
-          setWalletsSeeded(true);
-        } else {
-          setPaymentMethods(DEFAULT_PAYMENT_METHODS);
-          setWalletsSeeded(false);
-        }
+        const list = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<PaymentMethod, 'id'>),
+        }));
+        list.sort((a, b) => a.sortOrder - b.sortOrder);
+        setPaymentMethods(list);
+        setWalletsSeeded(list.length > 0);
+        patchLiveStoreCache({ paymentMethods: list });
+        walletsDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        walletsDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.LIST, 'paymentMethods');
       }
     );
@@ -624,20 +738,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubFlashDeals = onSnapshot(
       collection(db, 'flashDeals'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<FlashDeal, 'id'>),
-          }));
-          list.sort((a, b) => a.sortOrder - b.sortOrder);
-          setFlashDeals(list);
-          setFlashDealsSeeded(true);
-        } else {
-          setFlashDeals(defaultFlashDeals);
-          setFlashDealsSeeded(false);
-        }
+        const list = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<FlashDeal, 'id'>),
+        }));
+        list.sort((a, b) => a.sortOrder - b.sortOrder);
+        setFlashDeals(list);
+        setFlashDealsSeeded(list.length > 0);
+        patchLiveStoreCache({ flashDeals: list });
+        dealsDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        dealsDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.LIST, 'flashDeals');
       }
     );
@@ -645,20 +759,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const unsubBundles = onSnapshot(
       collection(db, 'bundles'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<ValueBundle, 'id'>),
-          }));
-          list.sort((a, b) => a.sortOrder - b.sortOrder);
-          setBundles(list);
-          setBundlesSeeded(true);
-        } else {
-          setBundles(DEFAULT_BUNDLES);
-          setBundlesSeeded(false);
-        }
+        const list = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<ValueBundle, 'id'>),
+        }));
+        list.sort((a, b) => a.sortOrder - b.sortOrder);
+        setBundles(list);
+        setBundlesSeeded(list.length > 0);
+        patchLiveStoreCache({ bundles: list });
+        bundlesDone = true;
+        markReadyIfAllLoaded();
       },
       (error) => {
+        bundlesDone = true;
+        markReadyIfAllLoaded();
         handleFirestoreError(error, OperationType.LIST, 'bundles');
       }
     );
@@ -675,7 +789,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unsubFlashDeals();
       unsubBundles();
     };
-  }, [defaultFlashDeals]);
+  }, []);
 
   // User-Scoped Subscriptions (Profile, Orders, Topups, Vouchers, Personal Notifications, Support)
   useEffect(() => {
@@ -941,39 +1055,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [bundles]
   );
 
-  const seedPromotionsOnly = async (seedFlash: boolean, seedBundles: boolean) => {
-    if (!seedFlash && !seedBundles) return;
-    const batch = writeBatch(db);
-    if (seedFlash) {
-      const freshDeals = createDefaultFlashDeals(Date.now());
-      for (const deal of freshDeals) {
-        const { id, ...rest } = deal;
-        batch.set(doc(db, 'flashDeals', id), {
-          ...rest,
-          startsAt: Timestamp.fromMillis(toMillisSafe(rest.startsAt) || Date.now()),
-          endsAt: Timestamp.fromMillis(
-            toMillisSafe(rest.endsAt) || Date.now() + 18 * 60 * 60 * 1000
-          ),
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-    if (seedBundles) {
-      for (const bundle of DEFAULT_BUNDLES) {
-        const { id, ...rest } = bundle;
-        batch.set(doc(db, 'bundles', id), {
-          ...rest,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-    try {
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'seed_promotions');
-    }
-  };
-
   const seedDefaultStoreData = async () => {
     const batch = writeBatch(db);
     batch.set(doc(db, 'siteConfig', 'main'), {
@@ -1040,15 +1121,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       handleFirestoreError(error, OperationType.WRITE, 'seed_store');
     }
   };
-
-  useEffect(() => {
-    if (!authReady || !isAdmin) return;
-    if (!catalogSeeded || !walletsSeeded || !categoriesSeeded) {
-      void seedDefaultStoreData();
-    } else if (!flashDealsSeeded || !bundlesSeeded) {
-      void seedPromotionsOnly(!flashDealsSeeded, !bundlesSeeded);
-    }
-  }, [authReady, isAdmin, catalogSeeded, walletsSeeded, categoriesSeeded, flashDealsSeeded, bundlesSeeded]);
 
   const updateUserProfile = async (data: { displayName: string; phone: string }) => {
     if (!user) throw new Error('يجب تسجيل الدخول أولاً.');
@@ -1713,6 +1785,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <StoreContext.Provider
       value={{
+        storeReady,
         theme,
         toggleTheme,
         nowMs,

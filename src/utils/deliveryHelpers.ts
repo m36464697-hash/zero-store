@@ -104,8 +104,26 @@ export function generateAutoTopupRef(): string {
 }
 
 export function toMillisSafe(ts: unknown): number {
-  if (ts && typeof ts === 'object' && 'toMillis' in ts) {
-    return (ts as { toMillis: () => number }).toMillis();
+  if (ts && typeof ts === 'object') {
+    if ('toMillis' in ts && typeof (ts as { toMillis: unknown }).toMillis === 'function') {
+      return (ts as { toMillis: () => number }).toMillis();
+    }
+    if ('seconds' in ts && typeof (ts as { seconds: unknown }).seconds === 'number') {
+      const sec = (ts as { seconds: number }).seconds;
+      const ns =
+        'nanoseconds' in ts && typeof (ts as { nanoseconds: unknown }).nanoseconds === 'number'
+          ? (ts as { nanoseconds: number }).nanoseconds
+          : 0;
+      return sec * 1000 + Math.floor(ns / 1e6);
+    }
+    if ('_seconds' in ts && typeof (ts as { _seconds: unknown })._seconds === 'number') {
+      const sec = (ts as { _seconds: number })._seconds;
+      const ns =
+        '_nanoseconds' in ts && typeof (ts as { _nanoseconds: unknown })._nanoseconds === 'number'
+          ? (ts as { _nanoseconds: number })._nanoseconds
+          : 0;
+      return sec * 1000 + Math.floor(ns / 1e6);
+    }
   }
   if (typeof ts === 'string' || typeof ts === 'number') {
     const t = new Date(ts).getTime();
